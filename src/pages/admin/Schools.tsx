@@ -252,21 +252,37 @@ export default function AdminSchools() {
       toast({ title: "Champ requis", description: "Le nom de l'établissement est obligatoire." });
       return;
     }
-    const { error } = await supabase.from("schools").insert({
-      name: createForm.name.trim(),
-      short_name: createForm.short_name.trim() || null,
-      description: createForm.description.trim() || null,
-      is_active: true,
-      allowed_bac_options: createForm.allowed_bac_options,
-    });
-    if (error) {
-      toast({ title: "Erreur", description: "Impossible de créer l'école." });
-      return;
+    try {
+      // Cast to database enum type (which includes SC, SE, ARTS but we're using STE, STM)
+      // This will work once the migration adds STE and STM to the enum
+      const { data, error } = await supabase.from("schools").insert({
+        name: createForm.name.trim(),
+        short_name: createForm.short_name.trim() || null,
+        description: createForm.description.trim() || null,
+        is_active: true,
+        allowed_bac_options: createForm.allowed_bac_options as any,
+      }).select();
+      
+      if (error) {
+        console.error("Error creating school:", error);
+        toast({ 
+          title: "Erreur", 
+          description: error.message || "Impossible de créer l'école." 
+        });
+        return;
+      }
+      
+      toast({ title: "Succès", description: "École créée." });
+      setDialogOpen(false);
+      setCreateForm({ name: "", short_name: "", description: "", allowed_bac_options: [] });
+      fetchSchools();
+    } catch (e: any) {
+      console.error("Unexpected error creating school:", e);
+      toast({ 
+        title: "Erreur", 
+        description: e.message || "Une erreur inattendue s'est produite." 
+      });
     }
-    toast({ title: "Succès", description: "École créée." });
-    setDialogOpen(false);
-    setCreateForm({ name: "", short_name: "", description: "", allowed_bac_options: [] });
-    fetchSchools();
   };
 
   /**
