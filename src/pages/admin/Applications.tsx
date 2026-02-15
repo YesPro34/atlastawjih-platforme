@@ -626,17 +626,35 @@ export default function AdminApplications() {
                     return;
                   }
 
-                  // Use first school as placeholder school_id (required by DB schema)
-                  // Store the actual school name and diplome in form_data
-                  const placeholderSchoolId = schools.length > 0 ? schools[0].id : null;
-                  
-                  if (!placeholderSchoolId) {
-                    toast({
-                      title: "Erreur",
-                      description: "Aucune école disponible dans le système. Veuillez d'abord créer une école.",
-                      variant: "destructive",
-                    });
+                  // Find or create a school record matching the entered name, then use its id.
+                  const schoolNameTrim = addSchoolName.trim();
+                  let targetSchoolId: string | null = null;
+
+                  // Try to find an existing school (case-insensitive)
+                  const { data: existingSchool, error: existingSchoolErr } = await supabase
+                    .from("schools")
+                    .select("id")
+                    .ilike("name", schoolNameTrim)
+                    .maybeSingle();
+                  if (existingSchoolErr) {
+                    toast({ title: "Erreur", description: "Erreur lors de la recherche de l'école.", variant: "destructive" });
                     return;
+                  }
+                  if (existingSchool) {
+                    targetSchoolId = (existingSchool as any).id;
+                  } else {
+                    // Create a new school record so we have a valid school_id
+                    const { data: newSchool, error: insertSchoolErr } = await supabase
+                      .from("schools")
+                      .insert({ name: schoolNameTrim })
+                      .select("id, name")
+                      .maybeSingle();
+                    if (insertSchoolErr || !newSchool) {
+                      toast({ title: "Erreur", description: "Impossible de créer l'école.", variant: "destructive" });
+                      return;
+                    }
+                    targetSchoolId = (newSchool as any).id;
+                    setSchools((s) => (newSchool ? [...s, newSchool as any] : s));
                   }
 
                   // Create application
@@ -646,11 +664,11 @@ export default function AdminApplications() {
 
                   const { error } = await supabase.from("applications").insert({
                     user_id: selectedStudent.user_id,
-                    school_id: placeholderSchoolId,
+                    school_id: targetSchoolId,
                     status: addStatus,
                     admin_note: addNote.trim() || null,
                     form_data: {
-                      school_name: addSchoolName.trim(),
+                      school_name: schoolNameTrim,
                       diplome: addDiplome.trim() || null,
                       created_by_admin: true,
                     } as any,
@@ -658,11 +676,12 @@ export default function AdminApplications() {
                   } as any);
 
                   if (error) {
-                    toast({
-                      title: "Erreur",
-                      description: "Impossible d'ajouter la candidature.",
-                      variant: "destructive",
-                    });
+                    // Duplicate (user_id, school_id) -> Postgres 23505
+                    if ((error as any).code === "23505" || /duplicate key/i.test(error.message || "")) {
+                      toast({ title: "Erreur", description: "Une candidature pour cet étudiant et cette école existe déjà.", variant: "destructive" });
+                    } else {
+                      toast({ title: "Erreur", description: "Impossible d'ajouter la candidature.", variant: "destructive" });
+                    }
                     return;
                   }
 
